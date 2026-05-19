@@ -3,9 +3,6 @@ from collections import defaultdict
 
 
 class PreTerminal:
-    #用基础结构 + 数字，特殊字符片段填充
-    #字母槽位保留为长度标识，不填充具体词汇
-
     def __init__(self, base_structure, digit_parts, special_parts, probability, pivot):
         self.base_structure = base_structure
         self.digit_parts = digit_parts
@@ -37,8 +34,6 @@ class PreTerminal:
 
 
 class Terminal:
-    #终端结构：预终结结构 + 字母槽位填充的字典词
-
     def __init__(self, pre_term, letter_parts, probability, pivot):
         self.pre_term = pre_term
         self.letter_parts = letter_parts
@@ -66,8 +61,6 @@ class Terminal:
 
 
 class PasswordGenerator:
-    #保持原有算法结构：优先队列 + pivot + 双阶段生成
-
     def __init__(self, grammar, prob_calc, dictionary=None):
         self.grammar = grammar
         self.prob_calc = prob_calc
@@ -83,7 +76,6 @@ class PasswordGenerator:
         self._build_dict_index()
 
     def _build_dict_index(self):
-        #建立字典长度索引和词概率缓存
         for word in self.dictionary:
             self.dict_by_length[len(word)].append(word)
 
@@ -99,7 +91,6 @@ class PasswordGenerator:
         return self.word_prob_cache.get(word, 0)
 
     def _get_digit_candidates(self, length):
-        #获取某长度数字片段候选，带缓存
         if length in self._digit_candidate_cache:
             return self._digit_candidate_cache[length]
 
@@ -115,7 +106,6 @@ class PasswordGenerator:
         return candidates
 
     def _get_special_candidates(self, length):
-        #获取某长度特殊字符片段候选，带缓存
         if length in self._special_candidate_cache:
             return self._special_candidate_cache[length]
 
