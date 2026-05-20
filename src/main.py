@@ -63,7 +63,7 @@ def main():
         print("未使用字典文件")
 
     grammar = PCFGGrammar()
-    grammar.learn_from_corpus(train_passwords)
+    grammar.learn_from_corpus(train_records)
 
     print(f"基础结构数量: {len(grammar.get_base_structures())}")
     print(f"数字片段数量: {len(grammar.get_digit_segments())}")
@@ -72,7 +72,8 @@ def main():
     prob_calc = ProbabilityCalculator(grammar)
 
     print("\n========== 生成候选密码 ==========")
-    generator = PasswordGenerator(grammar, prob_calc, dictionary=dictionary)
+    generator = PasswordGenerator(grammar, prob_calc, dictionary=dictionary,
+                                  train_passwords=train_passwords)
     candidate_passwords = generator.generate_passwords(
         max_passwords=args.max_guesses
     )

@@ -14,21 +14,11 @@ class PCFGGrammar:
     # 从密码语料库中学习文法规则，统计规则和终端符号的频率
 
     def __init__(self):
-        # 存储基础结构及其出现次数
-        # 例如: {(('L', 8), ('D', 3)): 5, (('L', 3), ('D', 2)): 3}
         self.base_structures = defaultdict(int)
-
-        # 存储数字片段（按长度）及其出现次数
-        # 例如: {(1, '1'): 10, (2, '12'): 8, (3, '123'): 5}
         self.digit_segments = defaultdict(int)
-
-        # 存储特殊字符片段（按长度）及其出现次数
-        # 例如: {(1, '@'): 15, (2, '@#'): 3}
         self.special_segments = defaultdict(int)
-
-        # 存储字母片段的长度分布
-        # 例如: {8: 100, 6: 50, 10: 30}
         self.letter_length_dist = defaultdict(int)
+        self.letter_segments = defaultdict(int)
 
     def classify_char(self, char):
         # 将单个字符分类为基本类型
@@ -86,13 +76,6 @@ class PCFGGrammar:
         return tuple(structure)
 
     def learn_from_password(self, password, count=1):
-        # 从单个密码学习规则
-        # 学习过程：
-        # 1. 将密码切分为片段
-        # 2. 提取基础结构并统计
-        # 3. 统计数字片段（按长度）
-        # 4. 统计特殊字符片段（按长度）
-        # 5. 统计字母片段的长度分布
         if not password:
             return
 
@@ -100,7 +83,6 @@ class PCFGGrammar:
         structure = self.segments_to_structure(segments)
 
         self.base_structures[structure] += count
-        # 遍历每个片段，分别统计
         for seg_type, seg_content in segments:
             seg_length = len(seg_content)
 
@@ -110,6 +92,7 @@ class PCFGGrammar:
                 self.special_segments[(seg_length, seg_content)] += count
             elif seg_type == 'L':
                 self.letter_length_dist[seg_length] += count
+                self.letter_segments[(seg_length, seg_content.lower())] += count
 
     def learn_from_corpus(self, records):
         # 从密码语料库学习规则
@@ -200,7 +183,7 @@ class PCFGGrammar:
         return self.special_segments.get((length, content), 0)
 
     def get_letter_length_count(self, length):
-        # 获取特定长度的字母片段的计数
-        # 参数：length: 字母片段的长度
-        # 返回：int: 该长度的字母片段出现的次数，如果不存在返回 0
         return self.letter_length_dist.get(length, 0)
+
+    def get_letter_segments(self):
+        return dict(self.letter_segments)

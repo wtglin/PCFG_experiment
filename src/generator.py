@@ -61,28 +61,70 @@ class Terminal:
 
 
 class PasswordGenerator:
-    def __init__(self, grammar, prob_calc, dictionary=None):
+    def __init__(self, grammar, prob_calc, dictionary=None, train_passwords=None):
         self.grammar = grammar
         self.prob_calc = prob_calc
         self.dictionary = dictionary or []
+        self.train_passwords = train_passwords or []
 
         self.dict_by_length = defaultdict(list)
         self.word_prob_cache = {}
 
         self._digit_candidate_cache = {}
         self._special_candidate_cache = {}
+        self._letter_candidate_cache = {}
         self._base_structure_cache = None
 
-        self._build_dict_index()
+        self._build_letter_index()
 
-    def _build_dict_index(self):
+    def _build_letter_index(self):
+        from collections import Counter
+
+        train_words_by_length = defaultdict(Counter)
+        for pwd in self.train_passwords:
+            segments = self.grammar.split_into_segments(pwd)
+            for seg_type, seg_content in segments:
+                if seg_type == 'L':
+                    train_words_by_length[len(seg_content)][seg_content.lower()] += 1
+
+        dict_words_by_length = defaultdict(set)
         for word in self.dictionary:
-            self.dict_by_length[len(word)].append(word)
+            w = word.lower()
+            dict_words_by_length[len(w)].add(w)
 
-        for length, words in self.dict_by_length.items():
-            prob = 1.0 / len(words) if words else 0
-            for w in words:
-                self.word_prob_cache[w] = prob
+        all_lengths = set(list(train_words_by_length.keys()) + list(dict_words_by_length.keys()))
+
+        for length in all_lengths:
+            train_counter = train_words_by_length.get(length, Counter())
+            dict_words = dict_words_by_length.get(length, set())
+
+            total_train_count = sum(train_counter.values())
+
+            all_words = []
+
+            if total_train_count > 0:
+                alpha = 0.95
+                for w, count in train_counter.most_common():
+                    prob = alpha * (count / total_train_count)
+                    all_words.append((w, prob))
+
+                unseen_dict_words = dict_words - set(train_counter.keys())
+                if unseen_dict_words:
+                    remaining_prob = (1.0 - alpha)
+                    per_word_prob = remaining_prob / len(unseen_dict_words)
+                    for w in sorted(unseen_dict_words):
+                        all_words.append((w, per_word_prob))
+            else:
+                if dict_words:
+                    prob = 1.0 / len(dict_words)
+                    for w in dict_words:
+                        all_words.append((w, prob))
+
+            all_words.sort(key=lambda x: x[1], reverse=True)
+            self.dict_by_length[length] = all_words
+
+            for w, p in all_words:
+                self.word_prob_cache[w] = p
 
     def get_words_by_length(self, length):
         return self.dict_by_length.get(length, [])
@@ -120,11 +162,16 @@ class PasswordGenerator:
         self._special_candidate_cache[length] = candidates
         return candidates
 
-    def _create_initial_pre_terminals(self, top_k=200):
+    def _create_initial_pre_terminals(self, top_k=50):
         initial_items = []
         base_structures = self.grammar.get_base_structures()
 
-        for structure in base_structures.keys():
+        for structure, count in base_structures.items():
+            if count < 2:
+                continue
+            if len(structure) > 6:
+                continue
+
             struct_prob = self.prob_calc.get_structure_probability(structure)
             if struct_prob <= 0:
                 continue
@@ -163,7 +210,7 @@ class PasswordGenerator:
                         new_dp[idx] = seg
                         new_combined.append((new_dp, special_parts, p * seg_p))
                 new_combined.sort(key=lambda x: x[2], reverse=True)
-                combined_candidates = new_combined[:50000]
+                combined_candidates = new_combined[:5000]
 
             for idx, cands in special_cands_list:
                 new_combined = []
@@ -173,7 +220,7 @@ class PasswordGenerator:
                         new_sp[idx] = seg
                         new_combined.append((digit_parts, new_sp, p * seg_p))
                 new_combined.sort(key=lambda x: x[2], reverse=True)
-                combined_candidates = new_combined[:50000]
+                combined_candidates = new_combined[:5000]
 
             for digit_parts, special_parts, p in combined_candidates:
                 pre_term = PreTerminal(
@@ -251,7 +298,8 @@ class PasswordGenerator:
 
         return next_items
 
-    def _create_initial_terminals(self, pre_term):
+    def _create_initial_terminals(self, pre_term, max_terminals=500):
+        import itertools
         reprs = pre_term.get_representation()
 
         letter_slots = []
@@ -260,7 +308,7 @@ class PasswordGenerator:
                 words = self.get_words_by_length(seg_val)
                 if not words:
                     return []
-                letter_slots.append((i, words))
+                letter_slots.append((i, words[:max_terminals]))
 
         if not letter_slots:
             terminal = Terminal(
@@ -271,60 +319,36 @@ class PasswordGenerator:
             )
             return [terminal]
 
-        first_letter_parts = {}
-        prob = pre_term.probability
-        for i, words in letter_slots:
-            first_letter_parts[i] = words[0]
-            prob *= self.get_word_probability(words[0])
+        if len(letter_slots) == 1:
+            i, words = letter_slots[0]
+            terminals = []
+            for word, word_prob in words:
+                letter_parts = {i: word}
+                prob = pre_term.probability * word_prob
+                t = Terminal(pre_term=pre_term, letter_parts=letter_parts,
+                           probability=prob, pivot=(0, 0))
+                terminals.append(t)
+            return terminals
 
-        terminal = Terminal(
-            pre_term=pre_term,
-            letter_parts=first_letter_parts,
-            probability=prob,
-            pivot=(0, 0),
-        )
-        return [terminal]
+        slot_indices = [range(min(len(words), max_terminals)) for _, words in letter_slots]
+        terminals = []
+        for combo in itertools.product(*slot_indices):
+            letter_parts = {}
+            prob = pre_term.probability
+            for slot_idx, word_idx in enumerate(combo):
+                i, words = letter_slots[slot_idx]
+                word, word_prob = words[word_idx]
+                letter_parts[i] = word
+                prob *= word_prob
+            t = Terminal(pre_term=pre_term, letter_parts=letter_parts,
+                        probability=prob, pivot=(0, 0))
+            terminals.append(t)
+            if len(terminals) >= max_terminals:
+                break
+        return terminals
 
     def _next_terminal(self, terminal):
-        next_items = []
-        pivot_pos, pivot_idx = terminal.pivot
-        bs = terminal.pre_term.base_structure
-
-        for i in range(pivot_pos, len(bs)):
-            seg_type, seg_len = bs[i]
-            if seg_type != 'L':
-                continue
-
-            words = self.get_words_by_length(seg_len)
-            if not words:
-                continue
-
-            start_idx = pivot_idx if i == pivot_pos else 0
-
-            for idx in range(start_idx, len(words)):
-                word = words[idx]
-                word_prob = self.get_word_probability(word)
-
-                old_word = terminal.letter_parts.get(i, None)
-                old_prob = self.get_word_probability(old_word) if old_word is not None else 1.0
-
-                new_prob = terminal.probability / old_prob * word_prob
-
-                new_letter_parts = terminal.letter_parts.copy()
-                new_letter_parts[i] = word
-
-                new_terminal = Terminal(
-                    pre_term=terminal.pre_term,
-                    letter_parts=new_letter_parts,
-                    probability=new_prob,
-                    pivot=(i, idx + 1),
-                )
-                next_items.append(new_terminal)
-
-            if next_items:
-                break
-
-        return next_items
+        return []
 
     def generate_passwords(self, max_passwords=100):
         import time
@@ -332,7 +356,7 @@ class PasswordGenerator:
         terminal_heap = []
 
         print("正在初始化预终结结构...")
-        for pt in self._create_initial_pre_terminals(top_k=200):
+        for pt in self._create_initial_pre_terminals(top_k=50):
             heapq.heappush(pre_term_heap, pt)
         print(f"初始预终结结构数量: {len(pre_term_heap)}")
 
